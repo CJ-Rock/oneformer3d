@@ -134,3 +134,8 @@ python tools/convert_synth_rockpile_to_pth.py \
 옵션:
 - `--save-backend auto|torch|pickle`
 - `--float-dtype float16|float32|float64`
+- `--split-ratio 8:1:1` (train:val:test 비율)
+- `--split-seed 42` (랜덤 분할 시드)
+
+
+기본 동작(aggregate 미사용)은 `output-dir/train`, `output-dir/val`, `output-dir/test` 폴더를 자동 생성하고, scene별 `.pth`를 **랜덤 8:1:1**로 배치합니다.

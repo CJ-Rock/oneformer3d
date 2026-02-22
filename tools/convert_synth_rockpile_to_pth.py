@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import json
 import pickle
+import random
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -38,6 +39,23 @@ def save_pth(obj: Any, out_path: Path, prefer_torch: bool) -> str:
         pickle.dump(obj, f, protocol=pickle.HIGHEST_PROTOCOL)
     return "pickle"
 
+
+
+
+def build_split_labels(n: int, ratio: str, seed: int) -> List[str]:
+    """Create randomized split labels for n samples with ratio like '8:1:1'."""
+    parts = [int(x) for x in ratio.split(":")]
+    if len(parts) != 3 or any(x < 0 for x in parts) or sum(parts) == 0:
+        raise ValueError("--split-ratio must be 3 non-negative ints like 8:1:1")
+
+    train_n = int(round(n * parts[0] / sum(parts)))
+    val_n = int(round(n * parts[1] / sum(parts)))
+    test_n = n - train_n - val_n
+
+    labels = ["train"] * train_n + ["val"] * val_n + ["test"] * test_n
+    rng = random.Random(seed)
+    rng.shuffle(labels)
+    return labels
 
 def load_scene(scene_dir: Path, dtype: str = "float32") -> Dict[str, Any]:
     """Load one generated scene directory into a serializable dict."""
@@ -64,6 +82,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--pattern", type=str, default="scene_*", help="Scene folder glob pattern")
     parser.add_argument("--aggregate", action="store_true", help="Store all scenes in one aggregated .pth")
     parser.add_argument("--aggregate-name", type=str, default="synth_rockpile_all.pth")
+    parser.add_argument("--split-ratio", type=str, default="8:1:1", help="Split ratio train:val:test for per-scene outputs")
+    parser.add_argument("--split-seed", type=int, default=42, help="Random seed for split shuffle")
     parser.add_argument(
         "--save-backend",
         type=str,
@@ -111,14 +131,24 @@ def main() -> None:
         print(f"saved aggregate: {out_path} ({backend}), scenes={len(all_scenes)}")
         return
 
-    for scene_dir in scene_dirs:
+    split_labels = build_split_labels(len(scene_dirs), args.split_ratio, args.split_seed)
+    split_dirs = {k: out_dir / k for k in ["train", "val", "test"]}
+    for d in split_dirs.values():
+        d.mkdir(parents=True, exist_ok=True)
+
+    split_counts = {"train": 0, "val": 0, "test": 0}
+    for scene_dir, split in zip(scene_dirs, split_labels):
         sample = load_scene(scene_dir, dtype=args.float_dtype)
-        out_path = out_dir / f"{scene_dir.name}.pth"
+        sample["split"] = split
+        out_path = split_dirs[split] / f"{scene_dir.name}.pth"
         backend = save_pth(sample, out_path, prefer_torch=prefer_torch)
+        split_counts[split] += 1
         print(
-            f"saved: {out_path} ({backend}) "
+            f"saved: {out_path} ({backend}) split={split} "
             f"points={sample['points'].shape[0]} lidar={sample['lidar_points'].shape[0]}"
         )
+
+    print(f"split summary: train={split_counts['train']} val={split_counts['val']} test={split_counts['test']}")
 
 
 if __name__ == "__main__":
