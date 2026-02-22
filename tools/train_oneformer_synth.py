@@ -16,6 +16,7 @@ import argparse
 import glob
 import os
 import pickle
+import inspect
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Tuple
@@ -28,11 +29,32 @@ from torch.utils.data import DataLoader, Dataset
 
 
 def load_pth(path: str):
+    """Robust .pth loader across torch versions and save backends.
+
+    - PyTorch >=2.6 changed torch.load default to weights_only=True.
+    - Our dataset .pth files may contain numpy objects, requiring weights_only=False.
+    - If file is pure pickle (converter fallback), use pickle.load.
+    """
+    torch_load_sig = inspect.signature(torch.load)
+    has_weights_only = "weights_only" in torch_load_sig.parameters
+
+    # 1) Prefer torch.load with weights_only=False when available.
+    try:
+        if has_weights_only:
+            return torch.load(path, map_location="cpu", weights_only=False)
+        return torch.load(path, map_location="cpu")
+    except Exception:
+        pass
+
+    # 2) Try legacy torch.load call once more (for edge compatibility).
     try:
         return torch.load(path, map_location="cpu")
     except Exception:
-        with open(path, "rb") as f:
-            return pickle.load(f)
+        pass
+
+    # 3) Fallback to raw pickle only for converter pickle backend outputs.
+    with open(path, "rb") as f:
+        return pickle.load(f)
 
 
 class SynthRockpilePthDataset(Dataset):

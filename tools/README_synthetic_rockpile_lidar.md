@@ -159,3 +159,10 @@ python tools/train_oneformer_synth.py \
 ```
 
 입력은 각 `.pth`의 `points`, `instance_ids`를 사용하며, `train/val` 기준으로 에폭마다 손실/정확도를 출력하고 `best.pth`, `last.pth`를 저장합니다.
+
+
+### PyTorch 2.6 `weights_only` 에러 대응
+
+`tools/train_oneformer_synth.py`는 PyTorch 2.6의 `torch.load(weights_only=True)` 기본값 변경을 고려해, 데이터 `.pth` 로드시 `weights_only=False` 경로를 우선 시도하도록 수정되었습니다.
+
+따라서 아래와 같은 에러(`Weights only load failed`, `numpy.core.multiarray._reconstruct`)가 발생하던 케이스를 직접 처리합니다.
