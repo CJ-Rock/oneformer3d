@@ -139,3 +139,23 @@ python tools/convert_synth_rockpile_to_pth.py \
 
 
 기본 동작(aggregate 미사용)은 `output-dir/train`, `output-dir/val`, `output-dir/test` 폴더를 자동 생성하고, scene별 `.pth`를 **랜덤 8:1:1**로 배치합니다.
+
+
+## OneFormer 기반 학습(train/val)
+
+`convert_synth_rockpile_to_pth.py`로 분할된 `train/`, `val/` 폴더를 사용해 OneFormer 스타일(쿼리 기반) 포인트 분할 모델을 학습할 수 있습니다.
+
+- 스크립트: `tools/train_oneformer_synth.py`
+
+예시:
+
+```bash
+python tools/train_oneformer_synth.py \
+  --data-root data/synth_rockpile_pth \
+  --epochs 30 \
+  --batch-size 4 \
+  --num-classes 200 \
+  --save-dir work_dirs/synth_oneformer
+```
+
+입력은 각 `.pth`의 `points`, `instance_ids`를 사용하며, `train/val` 기준으로 에폭마다 손실/정확도를 출력하고 `best.pth`, `last.pth`를 저장합니다.
