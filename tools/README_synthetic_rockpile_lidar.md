@@ -166,3 +166,25 @@ python tools/train_oneformer_synth.py \
 `tools/train_oneformer_synth.py`는 PyTorch 2.6의 `torch.load(weights_only=True)` 기본값 변경을 고려해, 데이터 `.pth` 로드시 `weights_only=False` 경로를 우선 시도하도록 수정되었습니다.
 
 따라서 아래와 같은 에러(`Weights only load failed`, `numpy.core.multiarray._reconstruct`)가 발생하던 케이스를 직접 처리합니다.
+
+
+## test 결과 시각화
+
+학습된 체크포인트(`best.pth`/`last.pth`)로 `test/` 폴더를 추론하고 시각화 파일을 생성합니다.
+
+- 스크립트: `tools/visualize_oneformer_synth_test.py`
+
+```bash
+python tools/visualize_oneformer_synth_test.py \
+  --data-root data/synth_rockpile_pth \
+  --ckpt work_dirs/synth_oneformer/best.pth \
+  --output-dir work_dirs/synth_oneformer_vis \
+  --max-scenes 50
+```
+
+출력(장면별):
+- `<scene>_gt.ply` : GT 라벨 색상
+- `<scene>_pred.ply` : 예측 라벨 색상
+- `<scene>_error.ply` : 정답(녹색)/오답(빨강)
+- `<scene>_meta.json` : 장면 정확도
+- `summary.json` : 전체 요약 정확도
