@@ -21,6 +21,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Tuple
 
+try:
+    from tqdm import tqdm
+except Exception:
+    tqdm = None
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -141,10 +146,30 @@ class OneFormerPointSeg(nn.Module):
         return logits
 
 
+def ap50_proxy(pred: torch.Tensor, labels: torch.Tensor, ignore_index: int = -100) -> float:
+    """Compute a class-wise IoU>=0.5 hit ratio as AP50-like proxy for segmentation."""
+    valid = labels != ignore_index
+    if not valid.any():
+        return 0.0
+    p = pred[valid]
+    g = labels[valid]
+    classes = torch.unique(torch.cat([p, g], dim=0))
+    hits = []
+    for c in classes:
+        tp = ((p == c) & (g == c)).sum().item()
+        fp = ((p == c) & (g != c)).sum().item()
+        fn = ((p != c) & (g == c)).sum().item()
+        den = tp + fp + fn
+        iou = (tp / den) if den > 0 else 0.0
+        hits.append(1.0 if iou >= 0.5 else 0.0)
+    return float(np.mean(hits)) if hits else 0.0
+
+
 @dataclass
 class Metrics:
     loss: float
     acc: float
+    ap50: float
 
 
 def step(model, batch, criterion, optimizer=None):
@@ -164,22 +189,30 @@ def step(model, batch, criterion, optimizer=None):
         pred = logits.argmax(dim=-1)
         valid = labels != -100
         correct = (pred[valid] == labels[valid]).float().mean().item() if valid.any() else 0.0
+        ap50 = ap50_proxy(pred, labels, ignore_index=-100)
 
-    return Metrics(loss=float(loss.item()), acc=correct)
+    return Metrics(loss=float(loss.item()), acc=correct, ap50=ap50)
 
 
-def run_epoch(model, loader, criterion, optimizer=None):
+def run_epoch(model, loader, criterion, optimizer=None, desc: str = ""):
     train = optimizer is not None
     model.train(train)
 
-    losses, accs = [], []
+    losses, accs, ap50s = [], [], []
+    iterator = loader
+    if tqdm is not None:
+        iterator = tqdm(loader, desc=desc, leave=False)
+
     with torch.set_grad_enabled(train):
-        for batch in loader:
+        for batch in iterator:
             m = step(model, batch, criterion, optimizer)
             losses.append(m.loss)
             accs.append(m.acc)
+            ap50s.append(m.ap50)
+            if tqdm is not None:
+                iterator.set_postfix(loss=f"{np.mean(losses):.4f}", acc=f"{np.mean(accs):.4f}", ap50=f"{np.mean(ap50s):.4f}")
 
-    return Metrics(loss=float(np.mean(losses)), acc=float(np.mean(accs)))
+    return Metrics(loss=float(np.mean(losses)), acc=float(np.mean(accs)), ap50=float(np.mean(ap50s)))
 
 
 def main():
@@ -248,13 +281,13 @@ def main():
 
     best_val = 1e9
     for epoch in range(1, args.epochs + 1):
-        tr = run_epoch(model, train_loader, criterion, optimizer)
-        va = run_epoch(model, val_loader, criterion, optimizer=None)
+        tr = run_epoch(model, train_loader, criterion, optimizer, desc=f"train {epoch:03d}")
+        va = run_epoch(model, val_loader, criterion, optimizer=None, desc=f"val {epoch:03d}")
 
         print(
             f"epoch={epoch:03d} "
-            f"train_loss={tr.loss:.4f} train_acc={tr.acc:.4f} "
-            f"val_loss={va.loss:.4f} val_acc={va.acc:.4f}"
+            f"train_loss={tr.loss:.4f} train_acc={tr.acc:.4f} train_ap50={tr.ap50:.4f} "
+            f"val_loss={va.loss:.4f} val_acc={va.acc:.4f} val_ap50={va.ap50:.4f}"
         )
 
         ckpt = {
@@ -263,6 +296,7 @@ def main():
             "optimizer": optimizer.state_dict(),
             "args": vars(args),
             "val_loss": va.loss,
+            "val_ap50": va.ap50,
         }
         torch.save(ckpt, save_dir / "last.pth")
 

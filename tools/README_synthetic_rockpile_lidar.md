@@ -158,7 +158,7 @@ python tools/train_oneformer_synth.py \
   --save-dir work_dirs/synth_oneformer
 ```
 
-입력은 각 `.pth`의 `points`, `instance_ids`를 사용하며, `train/val` 기준으로 에폭마다 손실/정확도를 출력하고 `best.pth`, `last.pth`를 저장합니다.
+입력은 각 `.pth`의 `points`, `instance_ids`를 사용하며, `train/val` 기준으로 에폭마다 손실/정확도와 `AP50`(IoU>=0.5 기반 proxy)를 출력하고 `best.pth`, `last.pth`를 저장합니다. 학습 중에는 tqdm 진행바로 배치 진행상황과 running metric(loss/acc/AP50)이 표시됩니다.
 
 
 ### PyTorch 2.6 `weights_only` 에러 대응
