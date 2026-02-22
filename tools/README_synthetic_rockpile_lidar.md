@@ -1,0 +1,190 @@
+# Synthetic Rock-Pile + Circular LiDAR Dataset Generation
+
+아래 스크립트로 다양한 형태의 암석 더미를 생성하고, 공중의 원형 궤적에서 360도 LiDAR 스캔을 수행해 점군 데이터를 만들 수 있습니다.
+
+## 스크립트
+
+- `tools/generate_synthetic_rockpile_lidar.py`
+
+## 요청사항 반영 기본값
+
+기본값으로 바로 아래 조건을 만족하도록 구성했습니다.
+
+- 한 더미당 암석 수: **200개** (`--num-rocks 200`)
+- 한 더미당 전체 점 개수: **약 10만~20만** (`200 x 500~1000`)
+- 각 암석 OBB 특성 기록: `obb_x`, `obb_y`, `obb_z`, `obb_volume`
+- 자연스러운 적층: 큰 암석부터 배치 + 중심부 채움 편향 + 코어 전용 채움 단계 + 중력 낙하(기본 10cm) + 3층 적층
+
+## 예시: 500개 장면 생성
+
+```bash
+python tools/generate_synthetic_rockpile_lidar.py \
+  --output-dir data/synth_rockpile_500 \
+  --num-scenes 500 \
+  --num-views 24 \
+  --scan-radius 4.0 \
+  --scan-height 2.0 \
+  --export-ply
+```
+
+## 출력 구조
+
+각 scene 폴더(`scene_0000`, `scene_0001`, ...)에 다음 파일이 저장됩니다.
+
+- `scene_points.npy`: 전체 암석 더미 점군 `(N, 3)`
+- `scene_instance_ids.npy`: 각 점의 암석 인스턴스 ID `(N,)`
+- `lidar_points.npy`: LiDAR 스캔으로 취득된 점군 `(M, 3)`
+- `lidar_view_ids.npy`: 각 LiDAR 점의 스캔 view 인덱스 `(M,)`
+- `meta.json`: 장면별 메타데이터 (암석별 OBB/부피 포함)
+
+`--export-ply`를 켜면 시각화를 위한 파일도 추가됩니다.
+
+- `scene_instances.ply`: 암석 인스턴스별 색상 점군 (더미가 어떻게 쌓였는지 확인)
+- `lidar_scan.ply`: view별 색상 LiDAR 점군
+- `scan_trajectory.xyz`: 공중 원형 스캔 궤적(센서 위치)
+
+CloudCompare / MeshLab / Open3D 등으로 `scene_instances.ply`를 열면 쌓임 형태를 직관적으로 볼 수 있습니다.
+
+## 핵심 파라미터
+
+- 암석 개수/밀도
+  - `--num-rocks` (기본 200)
+  - `--min-pts-per-rock`, `--max-pts-per-rock` (기본 500~1000)
+  - `--min-total-points`, `--max-total-points` (기본 100000~200000)
+- 더미 자연스러움
+  - `--pile-radius`, `--heightmap-res`, `--target-peak-height`, `--drop-height`
+  - `--core-fill-ratio`, `--core-radius-ratio`, `--num-layers` (기본 3)
+  - `--upper-layer-spread`, `--top-center-penalty`
+- 원형 LiDAR 스캔 궤적
+  - `--num-views`: 원 궤적 위 센서 위치 수
+  - `--scan-radius`: 센서 원 궤적 반지름
+  - `--scan-height`: 센서 높이
+- LiDAR 해상도/FOV
+  - `--lidar-azimuth-bins`, `--lidar-elevation-bins`
+  - `--lidar-elev-min`, `--lidar-elev-max`
+  - `--lidar-max-range`
+- 시각화 파일 출력
+  - `--export-ply`
+
+필요하면 `--seed`로 재현 가능한 데이터셋 생성이 가능합니다.
+
+
+## 암석이 공중에 떠보이는 이유와 개선
+
+기존 방식은 충돌 높이를 `max(local_surface - rock_z)`로 계산해서, 높이맵의 단일 스파이크(희소 점) 하나만 있어도 암석 전체가 위로 들릴 수 있었습니다.
+
+현재는 아래처럼 개선했습니다.
+
+- `--hmap-smooth-passes`(기본 1): 지지 높이맵을 3x3 평균으로 완만화
+- `--collision-quantile`(기본 0.98): `max` 대신 상위 분위수 기반 충돌 높이 사용
+
+이렇게 하면 침투는 억제하면서도 단일 이상치로 인한 부자연스러운 공중 부양이 크게 줄어듭니다.
+
+
+## 상층에서 중앙만 높아지는 이유와 개선
+
+원인은 보통 상층에서 반경이 과도하게 줄고(core 집중 + 작은 반경), top layer에서도 중심 채움이 계속되면서 중앙 기둥 형태가 생기기 때문입니다.
+
+현재는 다음을 적용했습니다.
+
+- top layer에서는 코어 전용 채움을 제한
+- `--upper-layer-spread`(기본 0.80)로 상층 반경 축소를 완화
+- `--top-center-penalty`(기본 0.20)로 상층의 과도한 중심 배치를 억제
+
+
+## LiDAR 스캔 방식 (원 궤도, 일정 높이, 균일 커버리지)
+
+현재 스크립트는 요청하신 방식대로 다음 절차로 스캔합니다.
+
+1. `scan_height` 고정 높이에서, `scan_radius` 반지름의 원 궤도 위에 센서를 둡니다.
+2. `num_views` 개 위치를 원 둘레에 **균일 간격**으로 배치합니다.
+3. 각 위치에서 360°(azimuth) LiDAR를 수행하고, elevation 범위 내 최근접 hit를 취득합니다.
+4. view별 점 수 편차를 줄이기 위해 `--max-points-per-view`로 상한을 적용해 균일도를 맞춥니다.
+
+관련 파라미터:
+- `--num-views`, `--scan-radius`, `--scan-height`
+- `--random-scan-phase` (scene마다 시작 각도 랜덤)
+- `--max-points-per-view` (기본 6000, <=0 이면 비활성화)
+
+
+## pth 파일 변환
+
+생성된 `scene_xxxx` 폴더들을 `.pth`로 변환하려면 아래 스크립트를 사용하세요.
+
+- `tools/convert_synth_rockpile_to_pth.py`
+
+예시 1) scene별 pth 생성
+
+```bash
+python tools/convert_synth_rockpile_to_pth.py \
+  --input-dir data/synth_rockpile_500 \
+  --output-dir data/synth_rockpile_pth
+```
+
+예시 2) 전체를 하나의 pth로 집계
+
+```bash
+python tools/convert_synth_rockpile_to_pth.py \
+  --input-dir data/synth_rockpile_500 \
+  --output-dir data/synth_rockpile_pth \
+  --aggregate \
+  --aggregate-name synth_rockpile_all.pth
+```
+
+옵션:
+- `--save-backend auto|torch|pickle`
+- `--float-dtype float16|float32|float64`
+- `--split-ratio 8:1:1` (train:val:test 비율)
+- `--split-seed 42` (랜덤 분할 시드)
+
+
+기본 동작(aggregate 미사용)은 `output-dir/train`, `output-dir/val`, `output-dir/test` 폴더를 자동 생성하고, scene별 `.pth`를 **랜덤 8:1:1**로 배치합니다.
+
+
+## OneFormer 기반 학습(train/val)
+
+`convert_synth_rockpile_to_pth.py`로 분할된 `train/`, `val/` 폴더를 사용해 OneFormer 스타일(쿼리 기반) 포인트 분할 모델을 학습할 수 있습니다.
+
+- 스크립트: `tools/train_oneformer_synth.py`
+
+예시:
+
+```bash
+python tools/train_oneformer_synth.py \
+  --data-root data/synth_rockpile_pth \
+  --epochs 30 \
+  --batch-size 4 \
+  --num-classes 200 \
+  --save-dir work_dirs/synth_oneformer
+```
+
+입력은 각 `.pth`의 `points`, `instance_ids`를 사용하며, `train/val` 기준으로 에폭마다 손실/정확도와 `AP50`(IoU>=0.5 기반 proxy)를 출력하고 `best.pth`, `last.pth`를 저장합니다. 학습 중에는 tqdm 진행바로 배치 진행상황과 running metric(loss/acc/AP50)이 표시됩니다.
+
+
+### PyTorch 2.6 `weights_only` 에러 대응
+
+`tools/train_oneformer_synth.py`는 PyTorch 2.6의 `torch.load(weights_only=True)` 기본값 변경을 고려해, 데이터 `.pth` 로드시 `weights_only=False` 경로를 우선 시도하도록 수정되었습니다.
+
+따라서 아래와 같은 에러(`Weights only load failed`, `numpy.core.multiarray._reconstruct`)가 발생하던 케이스를 직접 처리합니다.
+
+
+## test 결과 시각화
+
+학습된 체크포인트(`best.pth`/`last.pth`)로 `test/` 폴더를 추론하고 시각화 파일을 생성합니다.
+
+- 스크립트: `tools/visualize_oneformer_synth_test.py`
+
+```bash
+python tools/visualize_oneformer_synth_test.py \
+  --data-root data/synth_rockpile_pth \
+  --ckpt work_dirs/synth_oneformer/best.pth \
+  --output-dir work_dirs/synth_oneformer_vis \
+  --max-scenes 50
+```
+
+출력(장면별):
+- `<scene>_gt.ply` : GT 라벨 색상
+- `<scene>_pred.ply` : 예측 라벨 색상
+- `<scene>_error.ply` : 정답(녹색)/오답(빨강)
+- `<scene>_meta.json` : 장면 정확도
+- `summary.json` : 전체 요약 정확도
