@@ -46,6 +46,23 @@ Important notes:
  * All models can be trained with a single GPU with 32 Gb memory (or even 24 Gb for ScanNet dataset). If you face issues with RAM during instance segmentation evaluation at validation or test stages feel free to decrease `model.test_cfg.topk_insts` in config file.
  * Due to the bug in SpConv we [reshape](tools/fix_spconv_checkpoint.py) backbone weights between train and test stages.
 
+### Training quality checklist (especially for synthetic pre-training)
+
+If your training quality is much lower than reported numbers, check these items first:
+
+1. **Start from the intended initialization checkpoint.**
+   ScanNet and ScanNet200 configs are designed to use pretrained backbones and quality drops a lot without them.
+2. **Confirm data preprocessing exactly matches this repo.**
+   For ScanNet we additionally require superpoint clustering during preprocessing.
+3. **For S3DIS, keep the two-stage recipe.**
+   First pre-train on ScanNet + Structured3D (`instance-only-oneformer3d_1xb2_scannet-and-structured3d.py`), then fine-tune on S3DIS (`oneformer3d_1xb2_s3dis-area-5.py`).
+4. **Tune task balance deliberately.**
+   Increasing `model.criterion.sem_criterion.loss_weight` improves semantic metrics while decreasing it improves instance metrics.
+5. **When memory is tight, reduce `model.test_cfg.topk_insts`.**
+   Out-of-memory during evaluation can silently degrade validation cadence and model selection.
+6. **Apply SpConv checkpoint fix before testing/evaluation.**
+   Skipping `tools/fix_spconv_checkpoint.py` can produce unexpectedly poor test numbers.
+
 #### ScanNet
 
 For ScanNet we present the model with [SpConv](https://github.com/traveller59/spconv) backbone, superpoint pooling, selecting all queries, and predicting semantics directly from instance queries. Backbone is initialized from [SSTNet](https://github.com/Gorilla-Lab-SCUT/SSTNet) checkpoint. It should be [downloaded](https://github.com/oneformer3d/oneformer3d/releases/download/v1.0/sstnet_scannet.pth) and put to `work_dirs/tmp` before training.
