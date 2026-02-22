@@ -105,3 +105,32 @@ CloudCompare / MeshLab / Open3D 등으로 `scene_instances.ply`를 열면 쌓임
 - `--num-views`, `--scan-radius`, `--scan-height`
 - `--random-scan-phase` (scene마다 시작 각도 랜덤)
 - `--max-points-per-view` (기본 6000, <=0 이면 비활성화)
+
+
+## pth 파일 변환
+
+생성된 `scene_xxxx` 폴더들을 `.pth`로 변환하려면 아래 스크립트를 사용하세요.
+
+- `tools/convert_synth_rockpile_to_pth.py`
+
+예시 1) scene별 pth 생성
+
+```bash
+python tools/convert_synth_rockpile_to_pth.py \
+  --input-dir data/synth_rockpile_500 \
+  --output-dir data/synth_rockpile_pth
+```
+
+예시 2) 전체를 하나의 pth로 집계
+
+```bash
+python tools/convert_synth_rockpile_to_pth.py \
+  --input-dir data/synth_rockpile_500 \
+  --output-dir data/synth_rockpile_pth \
+  --aggregate \
+  --aggregate-name synth_rockpile_all.pth
+```
+
+옵션:
+- `--save-backend auto|torch|pickle`
+- `--float-dtype float16|float32|float64`
